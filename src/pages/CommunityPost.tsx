@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../firebaseConfig'; // Adjust the path as necessary
-import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { Link } from 'react-router-dom';
 
 interface CommunityPostData {
@@ -14,45 +14,60 @@ interface CommunityPostData {
     photoUrl: string; // URL for user profile photo
     reactionsCount?: number; // Count of reactions
     commentsCount?: number; // Count of comments
+    status?: string; // New status field
 }
 
 const CommunityPost: React.FC = () => {
     const [communityPosts, setCommunityPosts] = useState<CommunityPostData[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState<boolean>(true);
+
+    const fetchCommunityPosts = async () => {
+        try {
+            const postsSnapshot = await getDocs(collection(db, 'posts'));
+            const postsData: CommunityPostData[] = await Promise.all(
+                postsSnapshot.docs.map(async (doc) => {
+                    const reactionsCount = await fetchReactionsCount(doc.id);
+                    const commentsCount = await fetchCommentsCount(doc.id);
+                    return {
+                        id: doc.id,
+                        ...doc.data(),
+                        reactionsCount,
+                        commentsCount,
+                    } as CommunityPostData;
+                })
+            );
+            setCommunityPosts(postsData);
+        } catch (error) {
+            console.error("Error fetching community posts: ", error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const fetchReactionsCount = async (postId: string): Promise<number> => {
         const reactionsCollection = collection(db, `posts/${postId}/reactions`);
         const reactionsSnapshot = await getDocs(reactionsCollection);
-        return reactionsSnapshot.size; // Count the number of documents in the reactions collection
+        return reactionsSnapshot.size;
     };
 
     const fetchCommentsCount = async (postId: string): Promise<number> => {
         const commentsCollection = collection(db, `posts/${postId}/comments`);
         const commentsSnapshot = await getDocs(commentsCollection);
-        return commentsSnapshot.size; // Count the number of documents in the comments collection
+        return commentsSnapshot.size;
     };
 
-    const fetchCommunityPosts = async () => {
+    const handleUpdateStatus = async (postId: string, status: string) => {
         try {
-            const querySnapshot = await getDocs(collection(db, 'posts'));
-            const postsData: CommunityPostData[] = [];
-
-            for (const doc of querySnapshot.docs) {
-                const reactionsCount = await fetchReactionsCount(doc.id); // Get reactions count for each post
-                const commentsCount = await fetchCommentsCount(doc.id); // Get comments count for each post
-                postsData.push({
-                    id: doc.id,
-                    ...doc.data(),
-                    reactionsCount,
-                    commentsCount
-                } as CommunityPostData);
-            }
-
-            setCommunityPosts(postsData);
-            setLoading(false);
+            await updateDoc(doc(db, 'posts', postId), { status });
+            setCommunityPosts((prevPosts) =>
+                prevPosts.map((post) => 
+                    post.id === postId ? { ...post, status } : post
+                )
+            );
+            alert(`Post ${status} successfully.`);
         } catch (error) {
-            console.error("Error fetching community posts: ", error);
-            setLoading(false);
+            console.error("Error updating status: ", error);
+            alert("Failed to update status. Please try again.");
         }
     };
 
@@ -60,8 +75,8 @@ const CommunityPost: React.FC = () => {
         const confirmDelete = window.confirm("Are you sure you want to delete this post?");
         if (confirmDelete) {
             try {
-                await deleteDoc(doc(db, 'posts', postId)); // Delete the post
-                setCommunityPosts(communityPosts.filter(post => post.id !== postId)); // Update the state
+                await deleteDoc(doc(db, 'posts', postId));
+                setCommunityPosts(communityPosts.filter(post => post.id !== postId));
                 alert("Post deleted successfully.");
             } catch (error) {
                 console.error("Error deleting post: ", error);
@@ -71,7 +86,7 @@ const CommunityPost: React.FC = () => {
     };
 
     useEffect(() => {
-        fetchCommunityPosts(); // Fetch posts when the component mounts
+        fetchCommunityPosts();
     }, []);
 
     if (loading) {
@@ -93,6 +108,7 @@ const CommunityPost: React.FC = () => {
                             <th className="border p-2">Created At</th>
                             <th className="border p-2">Reactions</th>
                             <th className="border p-2">Comments</th>
+                            <th className="border p-2">Status</th>
                             <th className="border p-2">Action</th>
                         </tr>
                     </thead>
@@ -118,15 +134,33 @@ const CommunityPost: React.FC = () => {
                                 <td className="border p-2">
                                     {post.commentsCount !== undefined ? post.commentsCount : 0}
                                 </td>
-                                <td className="border p-2 flex space-x-2">
-                                    <Link to={`/post-details/${post.id}`} className="text-blue-600">
+                                <td className="border p-2 text-center">
+                                    {post.status || 'Pending'}
+                                </td>
+                                <td className="border p-2 flex space-x-2 justify-center">
+                                    <Link 
+                                        to={`/post-details/${post.id}`} 
+                                        className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                                    >
                                         View Details
                                     </Link>
                                     <button 
                                         onClick={() => handleDeletePost(post.id)} 
-                                        className="text-red-600 hover:text-red-800"
+                                        className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
                                     >
                                         Delete
+                                    </button>
+                                    <button
+                                        onClick={() => handleUpdateStatus(post.id, 'Accepted')}
+                                        className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600"
+                                    >
+                                        Accept
+                                    </button>
+                                    <button
+                                        onClick={() => handleUpdateStatus(post.id, 'Declined')}
+                                        className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
+                                    >
+                                        Decline
                                     </button>
                                 </td>
                             </tr>
